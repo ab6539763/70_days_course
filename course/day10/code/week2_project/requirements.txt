@@ -1,0 +1,4 @@
+# week2_project 依赖清单(pip install -r requirements.txt 一键复原)
+# Day 10:暂无第三方依赖,全部使用标准库
+# Day 12 起将加入:requests
+# Day 13 起将加入:python-dotenv
