@@ -265,6 +265,124 @@ def prepare_session() -> ChatSession:
 
 ---
 
+# 【代码评审实录】五段真实学员代码的现场重构
+
+> 晚自习点评环节的完整记录。五段代码全部来自历届学员的真实提交(略作脱敏),每段先看"提交版",再看评审对话,最后看"重构版"。**读别人的坏代码并说出坏在哪,是比写代码更稀缺的能力。**
+
+## 评审 1:巨型主循环(历届 Top1 问题)
+
+**提交版(节选,原文 187 行全在 while True 里):**
+
+```python
+while True:
+    text = input("你:").strip()
+    if text == "/save":
+        import json
+        from datetime import datetime
+        name = "session_" + datetime.now().strftime("%Y%m%d") + ".json"
+        data = []
+        for m in session.messages:
+            data.append({"role": m.role, "content": m.content})
+        f = open(name, "w")
+        json.dump(data, f)
+        f.close()
+        print("saved")
+    elif text == "/clear":
+        # ……又是 20 行……
+```
+
+**评审对话:**
+讲师:"这个 while 循环打印出来有四页纸。三个月后要给 /save 加'自动目录'功能,你怎么找到改哪?"
+学员:"Ctrl+F 搜 /save……"
+讲师:"搜到了,改的时候你敢保证不碰坏旁边的 /clear 吗?每个 elif 里的变量都活在同一个作用域里,name、data、f 全是邻居。"
+
+**重构要点**:①每个指令一个函数(单一职责,Day 06);②import 全部上移到文件顶部(PEP 8,Day 10);③裸 open 改 with + encoding(Day 11 铁律);④存档逻辑早在 Day 11 作业里写过——**复用,不要重新发明**。重构版就是参考实现里的 do_save + save_session,主循环从 187 行降到 40 行。
+
+## 评审 2:一把梭的 except(军规二惨案)
+
+**提交版:**
+
+```python
+try:
+    session.add_user(text)
+    reply = model.chat(session.to_api_format())
+    session.add_assistant(reply)
+    print(reply)
+    total = model.count_usage()["tokens"]
+    print(f"累计 {total}")
+except Exception:
+    print("出错了,请重试")
+```
+
+**评审对话:**
+讲师:"演示一下:把 print(f 累计 那行的 tokens 拼成 tokns。"
+学员:"……KeyError。但是程序只说'出错了,请重试'。"
+讲师:"对。你的手误 bug 和网络断线,用户看到的是同一句话,你排查时也只有同一句话。这个 except 吞掉了你自己的 bug。还有一个更隐蔽的:出错时 add_user 已经执行了,回滚呢?"
+
+**重构要点**:①try 只包住"真正可能出环境错误的那一行"(model.chat),军规三;②分路捕获 ChatLibError(环境错误,补救)而不是 Exception(把编程错误也吞了);③失败回滚 pop;④展示代码(print)移出 try——它们不会抛网络异常,别陪绑。重构版即参考实现 2.2 节。
+
+## 评审 3:记忆的"假多轮"
+
+**提交版:**
+
+```python
+history = []                                # 自己维护了一个"历史"
+while True:
+    text = input("你:")
+    history.append(text)                    # 记了……
+    messages = [
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content": text},  # 但每轮只发本轮!
+    ]
+    reply = model.chat(messages)
+    history.append(reply)
+```
+
+**评审对话:**
+讲师:"你的 history 记得很全,F1 验收为什么失败?"
+学员:"因为……history 只是我本地记着,发给模型的 messages 每轮都是新的。"
+讲师:"完全正确。这就是 Day 12 作业里'留痕'和'记忆'的区别——你做了一个完美的留痕系统。模型的记忆只存在于你发给它的 messages 里,一个字都不多。"
+
+**重构要点**:删掉自制 history,直接用 ChatSession——add_user/add_assistant 维护的列表**就是**发送的列表,一份数据两个用途,天然一致。自造平行数据结构(history 和 messages 各存一份)是数据不一致 bug 的温床,**同一事实只存一份**(单一事实来源原则)。
+
+## 评审 4:硬编码的海洋
+
+**提交版(散布在全文各处):**
+
+```python
+    resp = requests.post("https://api.deepseek.com/chat/completions", ...)   # 第 45 行
+    ...
+    print("费用:", tokens / 1000000 * 1.5)          # 第 89 行
+    ...
+    if len(session.messages) > 21:                   # 第 130 行
+    ...
+    print("费用大约", tokens / 1000000 * 1.5, "元")   # 第 152 行(又一份!)
+```
+
+**评审对话:**
+讲师:"DeepSeek 明天涨价到 2 元,你要改几处?"
+学员:"两处……不对,我搜一下……三处。"
+讲师:"搜漏一处,成本报表从此说谎,而且不报错(最危险的那种错,Day 01 就讲过)。这还是直接绕开了 chatlib 写 requests——T1 要求为什么存在?就是为了让 URL 这种东西只活在一个地方。"
+
+**重构要点**:①魔法数字提取为顶部常量(PRICE_PER_M、MAX_MESSAGES——Day 01 v4 的第一课!);②URL 属于 DeepSeekModel 的类属性,业务代码永远不该见到它;③重复的成本计算提取成 print_cost_line 函数。**"同样的东西只写一遍"三个层次:值(常量)、逻辑(函数)、结构(类)——两周正好各学过一遍。**
+
+## 评审 5:没有测试的"我觉得没问题"
+
+**评审对话:**
+讲师:"你怎么知道 /clear 保住了人设?"
+学员:"我试过一次,没问题。"
+讲师:"你今天下午改了三次消息结构,每次改完都重新试过 /clear 吗?"
+学员:"……没有。"
+讲师:(现场跑 test_assistant.py,test_clear_keeps_system 红了)"上午还过的,下午第二次重构时碰坏的。人肉测试的问题不是不准,是**不可重复**——你不可能每次改动后把 11 项自测清单全走一遍,但机器可以,而且只要 0.3 秒。"
+
+**重构要点**:把自测清单里"可自动化的项"沉淀成 test_assistant.py(讲师版已给出六个测试)。**测试不是额外工作,是把你反正要做的人肉验证写成代码,一劳永逸。** 这个习惯在 Day 34(RAG 评估)和 Day 46(Agent 测试)会升级成正式方法论,今天先尝到甜头:改完代码跑一下测试,绿了才 commit。
+
+## 评审总结:五个问题的一根线
+
+巨型函数、一把梭 except、平行数据、硬编码、无测试——五个问题共享同一个病根:**只为"现在能跑"写代码,不为"三个月后要改"写代码**。而工程和习作的分水岭恰恰在后者。两周课程里所有看似啰嗦的纪律(常量提取、单一职责、军规、测试),都是在为"要改的那一天"付保险费。项目一是你第一次亲手交这笔保费——从项目二开始,你会开始收保险赔付。
+
+---
+
 # 【课堂笔记】Day 14 速查表(项目一核心资产)
 
 **多轮记忆三行**:add_user → chat(完整历史) → add_assistant
