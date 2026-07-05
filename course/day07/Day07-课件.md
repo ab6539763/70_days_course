@@ -470,6 +470,128 @@ assert word_freq("Hi, hi. Bye!") == {"hi": 2, "bye": 1}
 
 ---
 
+# 【周测试卷与答案】上机部分(50 分,90 分钟)
+
+> 上机部分与综合项目二选一计分:基础扎实的同学直接做综合项目(通讯录,50 分制按评分表);感觉吃力的同学先做下面三道独立上机题(20+15+15),再尽力完成项目。三道题都提供逐行讲解的参考答案——先自己写满 30 分钟再看。
+
+## 上机题 1(20 分):订单流水分析
+
+内置数据(照抄):
+
+```python
+orders = [
+    {"id": "A001", "user": "张三", "amount": 259.0, "status": "paid"},
+    {"id": "A002", "user": "李四", "amount": 88.5, "status": "cancelled"},
+    {"id": "A003", "user": "张三", "amount": 132.0, "status": "paid"},
+    {"id": "A004", "user": "王五", "amount": 46.0, "status": "paid"},
+    {"id": "A005", "user": "李四", "amount": 310.0, "status": "refunded"},
+]
+```
+
+要求:① 函数 `paid_total(orders) -> float`:已支付订单总金额;② 函数 `user_spending(orders) -> dict`:每个用户的已支付消费额(字典累加器——计数器的金额版);③ 函数 `top_spender(orders) -> str`:消费最高的用户名(max + key);④ 全部配 assert。
+
+**参考答案:**
+
+```python
+def paid_total(orders: list) -> float:
+    """已支付订单总金额。生成器版 sum + 条件过滤。"""
+    return sum(o["amount"] for o in orders if o["status"] == "paid")
+
+
+def user_spending(orders: list) -> dict:
+    """每用户已支付消费额:字典累加器(计数器的金额版)。"""
+    spending: dict = {}
+    for o in orders:
+        if o["status"] != "paid":          # 提前跳过:只统计已支付
+            continue
+        spending[o["user"]] = spending.get(o["user"], 0) + o["amount"]
+    return spending
+
+
+def top_spender(orders: list) -> str:
+    """消费最高的用户名。max 按字典的值比较,返回对应的键。"""
+    spending = user_spending(orders)
+    return max(spending, key=spending.get)     # 遍历键,按 spending[键] 比大小
+    # spending.get 不带括号:把方法本身当 key 函数用——函数是一等公民
+
+
+assert paid_total(orders) == 437.0             # 259 + 132 + 46
+assert user_spending(orders) == {"张三": 391.0, "王五": 46.0}
+assert top_spender(orders) == "张三"
+```
+
+评分:①5 分(过滤+求和)②8 分(累加器 + 跳过非 paid)③4 分(max key 用法)④3 分。`max(d, key=d.get)` 是"找字典里值最大的键"的标准一行,值得单独记住。
+
+## 上机题 2(15 分):指令解析器
+
+Day 14 的 AI 助手要支持 `/save my_chat.json` 这种"指令 + 参数"格式。写函数 `parse_command(text: str) -> tuple`:输入用户原始输入,返回 `(指令, 参数)` 元组——`"/save abc.json"` → `("/save", "abc.json")`;`"/clear"` → `("/clear", "")`;不以 / 开头 → `("", 原文本清洗后)`。全部清洗两端空白。配 assert。
+
+**参考答案:**
+
+```python
+def parse_command(text: str) -> tuple:
+    """解析用户输入:返回 (指令, 参数) 或 ("", 正文)。
+
+    split(maxsplit=1):最多切一刀——参数里允许有空格
+    (比如 /save my chat.json),这是 maxsplit 的经典用途。
+    """
+    text = text.strip()
+    if not text.startswith("/"):
+        return ("", text)                      # 非指令:原文本作为正文返回
+    parts = text.split(maxsplit=1)             # "/save a.json" → ["/save", "a.json"]
+    command = parts[0]
+    arg = parts[1].strip() if len(parts) > 1 else ""    # 没参数就给空串
+    return (command, arg)
+
+
+assert parse_command("/save abc.json") == ("/save", "abc.json")
+assert parse_command("  /clear  ") == ("/clear", "")
+assert parse_command("今天天气如何") == ("", "今天天气如何")
+assert parse_command("/save my chat.json") == ("/save", "my chat.json")
+```
+
+评分:startswith 判断 4 分、maxsplit 切分 5 分(用普通 split 后 join 回参数也给分)、无参数容错 4 分、assert 2 分。这个函数会在 Day 14 项目一里**原样上岗**——周测题就是项目零件,本课程一贯如此。
+
+## 上机题 3(15 分):对话历史的窗口截断
+
+写函数 `trim_history(messages: list, max_rounds: int = 3) -> list`:保留 system 消息(如果第一条是 system)+ 最近 max_rounds 轮对话(一轮 = 一条 user + 一条 assistant),返回**新列表**(不修改原列表)。这是 Day 27 窗口记忆的手工版。
+
+**参考答案:**
+
+```python
+def trim_history(messages: list, max_rounds: int = 3) -> list:
+    """保留 system + 最近 N 轮对话,返回新列表。
+
+    思路:①摘出 system;②剩余消息取最后 2*N 条(一轮两条);③拼回。
+    切片天然"尽力而为":不足 N 轮时全保留,不用额外判断。
+    """
+    if messages and messages[0]["role"] == "system":
+        system_part = messages[:1]             # 切片而不是 [0]:保持列表形态好拼接
+        chat_part = messages[1:]
+    else:
+        system_part = []
+        chat_part = messages
+
+    recent = chat_part[-max_rounds * 2:]       # 最后 2N 条(切片越界安全)
+    return system_part + recent                # 列表相加 = 拼接,产生新列表
+
+
+msgs = [{"role": "system", "content": "你是助教"}]
+for i in range(5):                             # 造 5 轮对话
+    msgs.append({"role": "user", "content": f"问{i}"})
+    msgs.append({"role": "assistant", "content": f"答{i}"})
+
+trimmed = trim_history(msgs, max_rounds=3)
+assert len(trimmed) == 7                       # 1 system + 3 轮 × 2
+assert trimmed[0]["role"] == "system"
+assert trimmed[1]["content"] == "问2"          # 最早保留的是第 2 轮(0 起)
+assert len(msgs) == 11                         # 原列表未被修改!
+```
+
+评分:system 摘取 5 分、负切片取最近 2N 条 5 分、返回新列表不动原件 3 分、assert 2 分。**"返回新列表还是原地修改"是有意识的设计决策**:本题要求新列表,因为截断是"发送 API 前的临时视图",正史(完整历史)要留着存盘——Day 27 你会看到 LangChain 也是这么设计的。
+
+---
+
 # 【课堂笔记】Day 07 速查表(第一周浓缩版)
 
 **因果链**:输入输出(D1)→ 清洗提问(D2)→ 选路重复(D3)→ 容器(D4)→ 命名容器+JSON(D5)→ 组织(D6)→ 合体(D7)
