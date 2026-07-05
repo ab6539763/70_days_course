@@ -1,0 +1,7 @@
+# Day 1
+__pycache__/
+*.pyc
+.venv/
+output/
+*.txt
+!requirements.txt
