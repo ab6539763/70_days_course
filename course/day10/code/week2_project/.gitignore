@@ -1,0 +1,10 @@
+# 虚拟环境:几百 MB 的库文件,别人用 requirements.txt 重建
+.venv/
+# Python 字节码缓存:机器生成,永远不进版本库
+__pycache__/
+*.pyc
+# 运行时产生的数据文件
+*.json
+!requirements.json
+# 【预告】Day 13 起最重要的一行:API Key 所在,泄露 = 盗刷
+.env
